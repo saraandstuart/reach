@@ -17,7 +17,9 @@ import org.apache.storm.testing.*;
 import org.apache.storm.topology.TopologyBuilder;
 import org.apache.storm.tuple.Fields;
 import org.apache.storm.tuple.Values;
-import org.junit.Assert;
+import org.hamcrest.Description;
+import org.hamcrest.Matcher;
+import org.hamcrest.TypeSafeMatcher;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -25,6 +27,8 @@ import java.io.IOException;
 import java.sql.Types;
 import java.util.List;
 import java.util.Map;
+
+import static org.junit.Assert.assertThat;
 
 /**
  * @author Stuart Shannon
@@ -35,9 +39,6 @@ public class TopologyExampleIT
     private static final String LOOKUP_BOLT = "lookup-bolt";
 
     private static final int NUMBER_OF_SUPERVISORS = 2;
-
-    protected static final String TABLE_NAME = "user";
-    protected static final String JDBC_CONF = "jdbc.conf";
 
     private static final String SELECT_QUERY = "select dept_name from department, user_department "
                                                + "where department.dept_id = user_department.dept_id"
@@ -68,7 +69,7 @@ public class TopologyExampleIT
     @Before
     public void setup()
     {
-        Map map = Maps.newHashMap();
+        Map<String, Object> map = Maps.newHashMap();
         map.put("dataSourceClassName","org.hsqldb.jdbc.JDBCDataSource");
         map.put("dataSource.url", "jdbc:hsqldb:mem:test");
         map.put("dataSource.user","SA");
@@ -98,7 +99,6 @@ public class TopologyExampleIT
         daemonConf.put(Config.STORM_LOCAL_MODE_ZMQ, false);
         mkClusterParam.setDaemonConf(daemonConf);
 
-
         final int userIdPeter = 1;
         final int userIdBob = 2;
         final int userIdAlice = 3;
@@ -107,9 +107,27 @@ public class TopologyExampleIT
         final long createDateBob = 1502528400000L;
         final long createDateAlice = 1502532000000L;
 
+        final Values[] expectedSpoutValues = {
+                new Values(userIdPeter, "peter", createDatePeter),
+                new Values(userIdBob, "bob", createDateBob),
+                new Values(userIdAlice, "alice", createDateAlice)
+        };
+
+        final Values[] expectedBoltValues = {
+                new Values(userIdPeter, "peter", "R&D", createDatePeter),
+                new Values(userIdBob, "bob", "Finance", createDateBob),
+                new Values(userIdAlice, "alice", "HR", createDateAlice)
+        };
+
+        final List<Object> expectedSpoutTuples = new Values(expectedSpoutValues);
+
+        final List<Object> expectedBoltTuples = new Values(expectedBoltValues);
+
+        // when
         Testing.withSimulatedTimeLocalCluster(mkClusterParam, new TestJob() {
 
-            public void run(ILocalCluster cluster) throws IOException {
+            public void run(ILocalCluster cluster) throws IOException
+            {
                 TopologyBuilder builder = new TopologyBuilder();
 
                 builder.setSpout(USER_SPOUT, new FeederSpout(new Fields("user_id", "user_name", "create_date")));
@@ -120,11 +138,7 @@ public class TopologyExampleIT
                 StormTopology topology = builder.createTopology();
 
                 MockedSources mockedSources = new MockedSources();
-
-                mockedSources.addMockData(USER_SPOUT,
-                        new Values(userIdPeter, "peter", createDatePeter),
-                        new Values(userIdBob, "bob", createDateBob),
-                        new Values(userIdAlice, "alice", createDateAlice));
+                mockedSources.addMockData(USER_SPOUT, expectedSpoutValues);
 
                 Config conf = new Config();
                 conf.setNumWorkers(2);
@@ -134,28 +148,35 @@ public class TopologyExampleIT
                 completeTopologyParam.setStormConf(conf);
 
                 Map result = Testing.completeTopology(cluster, topology, completeTopologyParam);
-
-                List<Object> expectedSpoutTuples = new Values(
-                        new Values(userIdPeter, "peter", createDatePeter),
-                        new Values(userIdBob, "bob", createDateBob),
-                        new Values(userIdAlice, "alice", createDateAlice));
-
                 List<Object> actualSpoutTuples = Testing.readTuples(result, USER_SPOUT);
-
-                List<Object> expectedBoltTuples = new Values(
-                        new Values(userIdPeter, "peter", "R&D", createDatePeter),
-                        new Values(userIdBob, "bob", "Finance", createDateBob),
-                        new Values(userIdAlice, "alice", "HR", createDateAlice));
-
                 List<Object> actualBoltTuples = Testing.readTuples(result, LOOKUP_BOLT);
 
-
-                Assert.assertTrue(Testing.multiseteq(expectedSpoutTuples, actualSpoutTuples));
-
-                Assert.assertTrue(Testing.multiseteq(expectedBoltTuples, actualBoltTuples));
+                // then
+                assertThat(actualSpoutTuples, isEqualIgnoresOrder(expectedSpoutTuples));
+                assertThat(actualBoltTuples, isEqualIgnoresOrder(expectedBoltTuples));
             }
         });
 
+    }
+
+    private Matcher<List<Object>> isEqualIgnoresOrder(final List<Object> expected) {
+        return new TypeSafeMatcher<List<Object>>() {
+            @Override
+            public void describeTo(final Description description) {
+                description.appendValue(expected);
+            }
+
+            @Override
+            protected void describeMismatchSafely(final List<Object> actual,
+                                                  final Description mismatchDescription) {
+                mismatchDescription.appendValue(actual);
+            }
+
+            @Override
+            protected boolean matchesSafely(final List<Object> actualItems) {
+                return Testing.multiseteq(expected, actualItems);
+            }
+        };
     }
 
 
