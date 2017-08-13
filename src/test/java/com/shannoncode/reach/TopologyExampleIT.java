@@ -108,7 +108,7 @@ public class TopologyExampleIT
         final long createDateAlice = 1502532000000L;
 
         final Values[] expectedSpoutValues = {
-                new Values(userIdPeter, "peter", createDatePeter),
+                new Values(userIdPeter, "pete", createDatePeter),
                 new Values(userIdBob, "bob", createDateBob),
                 new Values(userIdAlice, "alice", createDateAlice)
         };
@@ -161,7 +161,7 @@ public class TopologyExampleIT
 
     private Matcher<List<Object>> isEqualIgnoresOrder(final List<Object> expected) {
         return new TypeSafeMatcher<List<Object>>() {
-            @Override
+
             public void describeTo(final Description description) {
                 description.appendValue(expected);
             }
